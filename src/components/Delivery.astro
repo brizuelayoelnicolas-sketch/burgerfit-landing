@@ -1,0 +1,27 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<section class="delivery-section section-light" id="entregas">
+  <div class="container delivery-layout">
+    <div class="delivery-copy">
+      <p class="eyebrow eyebrow--dark">Así llega tu pedido</p>
+      <h2>De nuestra cocina <span>hasta vos.</span></h2>
+      <p class="delivery-lead">
+        Preparamos cada hamburguesa en casa el día de la venta y coordinamos la entrega directamente.
+      </p>
+      <ul class="delivery-list">
+        {burgerfit.delivery.map((detail) => <li>{detail}</li>)}
+      </ul>
+    </div>
+
+    <aside class="payment-panel">
+      <div class="payment-mark" aria-hidden="true">+</div>
+      <p class="eyebrow eyebrow--dark">Medios de pago</p>
+      <h3>Pagá como te quede cómodo.</h3>
+      <ul class="payment-list">
+        {burgerfit.payments.map((method) => <li>{method}<span aria-hidden="true">↗</span></li>)}
+      </ul>
+    </aside>
+  </div>
+</section>

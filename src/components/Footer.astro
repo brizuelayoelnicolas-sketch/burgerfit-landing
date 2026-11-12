@@ -1,0 +1,30 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<footer class="site-footer">
+  <div class="container footer-main">
+    <a class="brand-lockup" href="#inicio" aria-label="Burgerfit, volver al inicio">
+      <img
+        class="brand-lockup__image"
+        src={burgerfit.images.mascot}
+        alt=""
+        width="56"
+        height="56"
+        loading="lazy"
+      />
+      <span class="brand-lockup__name">Burger<span>fit</span></span>
+    </a>
+    <p class="footer-slogan">{burgerfit.slogan}</p>
+    <nav class="footer-nav" aria-label="Navegación del pie de página">
+      <a href="#hamburguesa">La hamburguesa</a>
+      <a href="#promociones">Promociones</a>
+      <a href="#entregas">Entregas y pagos</a>
+      <a href={burgerfit.instagram.url} target="_blank" rel="noreferrer">Instagram ↗</a>
+    </nav>
+  </div>
+  <div class="container footer-bottom">
+    <span>© {new Date().getFullYear()} Burgerfit</span>
+    <a href={burgerfit.instagram.url} target="_blank" rel="noreferrer">{burgerfit.instagram.handle}</a>
+  </div>
+</footer>

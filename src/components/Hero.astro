@@ -1,0 +1,42 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<section class="hero section-dark" id="inicio">
+  <div class="hero-scribble hero-scribble--one" aria-hidden="true"></div>
+  <div class="hero-scribble hero-scribble--two" aria-hidden="true"></div>
+  <div class="container hero-layout">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> Hamburguesas caseras</p>
+      <h1 class="text-balance">Hamburguesas caseras <span>con toda la actitud.</span></h1>
+      <p class="hero-slogan">{burgerfit.slogan}</p>
+      <p class="hero-description">
+        Hechas en casa el mismo día, con los ingredientes de siempre y mucho sabor.
+      </p>
+      <div class="button-row">
+        <a class="button button--yellow" href={burgerfit.instagram.url} target="_blank" rel="noreferrer">
+          Hacé tu pedido <span aria-hidden="true">↗</span>
+        </a>
+        <a class="button button--text" href="#promociones">Ver promociones <span aria-hidden="true">↓</span></a>
+      </div>
+    </div>
+
+    <div class="hero-visual">
+      <span class="hero-sticker" aria-hidden="true">SABOR<br />+ ENERGÍA</span>
+      <div class="hero-logo-wrap">
+        <img
+          src={burgerfit.images.mascot}
+          alt="Logo de Burgerfit: una hamburguesa musculosa"
+          width="1254"
+          height="1254"
+          fetchpriority="high"
+          decoding="async"
+        />
+      </div>
+      <span class="hero-caption">El sabor también es parte del entrenamiento.</span>
+    </div>
+  </div>
+  <a class="hero-scroll" href="#hamburguesa" aria-label="Bajar a la hamburguesa Burgerfit">
+    <span></span>
+  </a>
+</section>

@@ -1,0 +1,45 @@
+---
+import "../styles/global.css";
+import { burgerfit } from "../data/burgerfit";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = `${burgerfit.name} | ${burgerfit.slogan}`,
+  description = "Hamburguesas caseras Burgerfit, preparadas el mismo día. Conocé el menú y las promos, y pedí por Instagram.",
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="es" data-type="product">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="page-type" content="product" />
+    <meta name="site-kind" content="other" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta
+      property="og:image"
+      content={Astro.site ? new URL(burgerfit.images.currentPromo, Astro.site).href : burgerfit.images.currentPromo}
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/jpeg" href={burgerfit.images.mascot} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

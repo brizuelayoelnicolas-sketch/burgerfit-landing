@@ -1,0 +1,44 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<section class="product-section section-light" id="hamburguesa">
+  <div class="container">
+    <div class="section-heading product-heading">
+      <p class="eyebrow eyebrow--dark">La de la casa</p>
+      <h2>Una hamburguesa <span>bien hecha.</span></h2>
+    </div>
+
+    <div class="product-layout">
+      <div class="product-art">
+        <img
+          src={burgerfit.images.currentPromo}
+          alt="Pieza publicitaria Burgerfit con hamburguesas y los precios informados"
+          width="1491"
+          height="1055"
+          loading="lazy"
+          decoding="async"
+        />
+        <span class="product-art-tag">Hecha en casa</span>
+      </div>
+      <div class="product-details">
+        <div class="product-name-row">
+          <div>
+            <p class="eyebrow eyebrow--dark">La receta Burgerfit</p>
+            <h3>{burgerfit.product.name}</h3>
+          </div>
+          <p class="product-price">{burgerfit.product.price}</p>
+        </div>
+        <p class="product-description">
+          Una hamburguesa sencilla, casera y preparada el mismo día de la venta.
+        </p>
+        <ul class="ingredient-list" aria-label="Ingredientes">
+          {burgerfit.product.ingredients.map((ingredient) => <li>{ingredient}</li>)}
+        </ul>
+        <a class="button button--black" href={burgerfit.instagram.url} target="_blank" rel="noreferrer">
+          Pedí la tuya <span aria-hidden="true">↗</span>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>

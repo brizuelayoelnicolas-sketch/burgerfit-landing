@@ -1,0 +1,33 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<section class="promotions-section section-dark" id="promociones">
+  <div class="container">
+    <div class="section-heading promotions-heading">
+      <p class="eyebrow"><span class="eyebrow-dot"></span> Para compartir</p>
+      <h2>Las promos <span>de Burgerfit.</span></h2>
+      <p>Elegí tu combo y escribinos por Instagram.</p>
+    </div>
+
+    <div class="offer-list">
+      {burgerfit.promotions.map((promotion, index) => (
+        <article class:list={["offer", index === 1 && "offer--reverse"]}>
+          <div class="offer-count">
+            <span class="offer-number">{promotion.quantity}</span>
+            <span class="offer-word">hamburguesas</span>
+          </div>
+          <div class="offer-meta">
+            <span class="offer-label">Promo Burgerfit</span>
+            <p class="offer-price">{promotion.price}</p>
+            <a class="button button--yellow" href={burgerfit.instagram.url} target="_blank" rel="noreferrer">
+              Pedir {promotion.quantity} <span aria-hidden="true">↗</span>
+            </a>
+          </div>
+          <span class="offer-spark offer-spark--a" aria-hidden="true">✳</span>
+          <span class="offer-spark offer-spark--b" aria-hidden="true">✳</span>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
