@@ -23,7 +23,7 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
   try {
     if (params.route === "auth/logout") { cookies.delete("bf_session", { path: "/" }); return json({ ok: true }); }
     await ensureSchema();
-    const [res, id] = (params.route || "").split("/");
+    const [res, id, id2] = (params.route || "").split("/");
     const m = request.method;
     const body: any = m === "GET" || m === "DELETE" ? {} : await request.json().catch(() => ({}));
 
@@ -78,6 +78,63 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
     if (!admin) return fail("Iniciá sesión para continuar.", 401);
 
     const isAdmin = admin.role === "admin";
+
+    // --- Stock (planilla): solo administradores ---
+    if (res === "stock") {
+      if (!isAdmin) return fail("Solo un administrador puede ver el stock.", 403);
+      const today = "(now() at time zone 'America/Argentina/Buenos_Aires')::date";
+      const date = (v: unknown) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? String(v) : null);
+      try {
+        if (id === "all" && m === "GET") {
+          const [items, entries, sales] = await Promise.all([
+            q("select id, name, initial, minimum, unit_cost::float8 as unit_cost from stock_items order by sort"),
+            q("select id, item_id, to_char(entry_date,'YYYY-MM-DD') as date, qty, price, supplier, pay_method from stock_entries order by entry_date, created_at"),
+            q("select id, order_id, to_char(sale_date,'YYYY-MM-DD') as date, customer, product, burgers, price, total from sales order by sale_date, created_at"),
+          ]);
+          return json({ items, entries, sales });
+        }
+        if (id === "items") {
+          if (m === "DELETE" && id2) { await q("delete from stock_items where id = $1", [id2]); return json({ ok: true }); }
+          if (m === "POST" || (m === "PUT" && id2)) {
+            if (str(body.name).length < 2) return fail("Escribí el nombre del insumo.");
+            const v = [str(body.name, 80), int(body.initial), int(body.minimum), Math.max(0, Number(body.unit_cost) || 0)];
+            const r = m === "POST"
+              ? await q("insert into stock_items (name, initial, minimum, unit_cost) values ($1,$2,$3,$4) returning id, name, initial, minimum, unit_cost::float8 as unit_cost", v)
+              : await q("update stock_items set name=$2, initial=$3, minimum=$4, unit_cost=$5 where id=$1 returning id, name, initial, minimum, unit_cost::float8 as unit_cost", [id2, ...v]);
+            return json(r[0]);
+          }
+        }
+        if (id === "entries") {
+          if (m === "DELETE" && id2) { await q("delete from stock_entries where id = $1", [id2]); return json({ ok: true }); }
+          if (m === "POST") {
+            const list: any[] = Array.isArray(body) ? body : [body];
+            for (const e of list) {
+              const qty = int(e.qty);
+              if (!e.itemId || qty < 1) return fail("Elegí el insumo y una cantidad mayor a cero.");
+              const pay = oneOf(e.payMethod, ["efectivo", "transferencia", "mercadopago"] as const) || "efectivo";
+              await q(`insert into stock_entries (item_id, entry_date, qty, price, supplier, pay_method) values ($1, coalesce($2::date, ${today}), $3, $4, $5, $6)`,
+                [str(e.itemId, 60), date(e.date), qty, int(e.price), str(e.supplier, 80), pay]);
+            }
+            return json({ ok: true }, 201);
+          }
+        }
+        if (id === "sales") {
+          if (m === "DELETE" && id2) { await q("delete from sales where id = $1", [id2]); return json({ ok: true }); }
+          if (m === "POST") {
+            const prod = (await q("select * from products where id::text = $1", [str(body.productId, 60)]))[0];
+            const units = Math.min(100, Math.max(1, int(body.qty)));
+            if (!prod) return fail("Elegí el producto vendido.");
+            await q(`insert into sales (sale_date, customer, product, burgers, price, total) values (coalesce($1::date, ${today}), $2, $3, $4, $5, $6)`,
+              [date(body.date), str(body.customer, 80), prod.name, units * prod.qty, prod.price, units * prod.price]);
+            return json({ ok: true }, 201);
+          }
+        }
+      } catch (e: any) {
+        console.error(e);
+        return fail(/unique|duplicate/i.test(String(e?.message)) ? "Ya existe un insumo con ese nombre." : "No se pudo guardar. Revisá los datos.");
+      }
+      return fail("No encontrado.", 404);
+    }
     if (res === "orders") {
       if (m === "GET") {
         const rows = await q("select * from orders order by number desc limit 500");
@@ -90,6 +147,13 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
         // Cocina y reparto solo avanzan el pedido; cancelar y cobrar es de administración
         if (!isAdmin && (body.paid !== undefined || !st || !["preparando", "listo", "entregado"].includes(st))) return fail("No tenés permiso para esta acción.", 403);
         await q("update orders set status = coalesce($2, status), paid = coalesce($3::boolean, paid), updated_at = now() where id = $1", [id, st, typeof body.paid === "boolean" ? body.paid : null]);
+        if (st === "entregado") {
+          // Cada pedido entregado se anota en la hoja Ventas y descuenta del stock
+          await q(`insert into sales (order_id, sale_date, customer, product, burgers, price, total)
+            select o.id, (now() at time zone 'America/Argentina/Buenos_Aires')::date, o.customer_name, i.name, i.qty * coalesce(p.qty, 1), i.unit_price, i.qty * i.unit_price
+            from orders o join order_items i on i.order_id = o.id left join products p on p.id = i.product_id where o.id = $1
+            on conflict (order_id) do nothing`, [id]).catch((e) => console.error(e));
+        }
         return json({ ok: true });
       }
       if (m === "DELETE" && id) { if (!isAdmin) return fail("No tenés permiso para esta acción.", 403); await q("delete from orders where id = $1", [id]); return json({ ok: true }); }

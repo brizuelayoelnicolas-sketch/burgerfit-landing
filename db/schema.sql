@@ -62,3 +62,17 @@ insert into products (name, kind, qty, price, description) values
   ('Combo x3',              'combo',  3, 5500, 'Tres hamburguesas Burgerfit.'),
   ('Combo x5',              'combo',  5, 8500, 'Cinco hamburguesas Burgerfit.')
 on conflict do nothing;
+
+-- Control de stock (planilla del administrador)
+create table if not exists stock_items (id uuid primary key default gen_random_uuid(), sort serial, name text not null unique, initial int not null default 0 check (initial >= 0), minimum int not null default 0 check (minimum >= 0), unit_cost numeric(10,2) not null default 0 check (unit_cost >= 0), created_at timestamptz not null default now());
+
+create table if not exists stock_entries (id uuid primary key default gen_random_uuid(), item_id uuid not null references stock_items(id) on delete cascade, entry_date date not null default (now() at time zone 'America/Argentina/Buenos_Aires')::date, qty int not null check (qty > 0), price int not null default 0 check (price >= 0), supplier text not null default '', pay_method text not null default 'efectivo' check (pay_method in ('efectivo','transferencia','mercadopago')), created_at timestamptz not null default now());
+
+create table if not exists sales (id uuid primary key default gen_random_uuid(), order_id uuid unique references orders(id) on delete set null, sale_date date not null default (now() at time zone 'America/Argentina/Buenos_Aires')::date, customer text not null default '', product text not null, burgers int not null check (burgers > 0), price int not null default 0, total int not null default 0, created_at timestamptz not null default now());
+
+-- Cada hamburguesa vendida descuenta 1 unidad de cada insumo.
+-- Stock actual = stock inicial + entradas (stock_entries) - salidas (suma de sales.burgers)
+insert into stock_items (name, minimum, unit_cost) values
+  ('Carne',30,346),('Panes',30,200),('Queso',30,227.33),('Lechuga y tomate',30,183.33),
+  ('Mayonesa',30,100),('Papel aluminio',30,241.67),('Papel autoadhesivo',30,62.5)
+on conflict do nothing;

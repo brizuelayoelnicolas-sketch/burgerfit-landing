@@ -41,6 +41,7 @@ import { burgerfit } from "../data/burgerfit";
         <button role="tab" aria-selected="true" data-tab="orders">Pedidos</button>
         <button role="tab" aria-selected="false" data-tab="products">Productos y combos</button>
         <button role="tab" aria-selected="false" data-tab="users">Usuarios</button>
+        <button role="tab" aria-selected="false" data-tab="stock">Stock</button>
       </div>
 
       <section data-panel="orders">
@@ -57,6 +58,23 @@ import { burgerfit } from "../data/burgerfit";
         <div class="panel-head"><h2>Usuarios del panel</h2><button class="button button--small button--black" type="button" data-new="user">Nuevo usuario</button></div>
         <div class="table-wrap" data-users></div>
       </section>
+
+      <section data-panel="stock" hidden>
+        <div class="stats" data-stock-stats></div>
+        <div class="sheet">
+          <div class="sheet-bar">
+            <span class="fx" aria-hidden="true">fx</span>
+            <p data-formula></p>
+            <div class="sheet-actions" data-sheet-actions></div>
+          </div>
+          <div class="sheet-scroll" data-sheet></div>
+          <div class="sheet-tabs" role="tablist" aria-label="Hojas de la planilla">
+            <button role="tab" aria-selected="true" data-sheet-tab="stock">Stock</button>
+            <button role="tab" aria-selected="false" data-sheet-tab="ventas">Ventas</button>
+            <button role="tab" aria-selected="false" data-sheet-tab="compras">Compras</button>
+          </div>
+        </div>
+      </section>
     </main>
 
     <dialog class="modal" data-modal>
@@ -66,7 +84,7 @@ import { burgerfit } from "../data/burgerfit";
 </MainLayout>
 
 <script>
-  import { api, money, type Order, type OrderStatus, type Product, type User } from "../lib/store";
+  import { api, money, type Order, type OrderStatus, type Product, type User, type StockItem, type StockEntry, type Sale } from "../lib/store";
 
   const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
   const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -160,7 +178,118 @@ import { burgerfit } from "../data/burgerfit";
        <td class="row-actions"><button data-edit-user="${u.id}">Editar</button><button class="link-danger" data-del-user="${u.id}">Eliminar</button></td></tr>`).join("")}</tbody></table>`;
   };
 
-  const refreshAll = () => Promise.all([renderOrders(), ...(isAdmin ? [renderProducts(), renderUsers()] : [])]);
+  const refreshAll = () => Promise.all([renderOrders(), ...(isAdmin ? [renderProducts(), renderUsers(), renderStock()] : [])]);
+
+
+  // ---- Planilla de stock (solo administrador) ----
+  let stock: { items: StockItem[]; entries: StockEntry[]; sales: Sale[] } = { items: [], entries: [], sales: [] };
+  let sheet: "stock" | "ventas" | "compras" = "stock";
+  const todayAR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Argentina/Buenos_Aires" });
+  const fdate = (d: string) => { const [y, m, day] = d.split("-"); return `${day}/${m}/${y.slice(2)}`; };
+  const num = (n: number) => n.toLocaleString("es-AR");
+  const out = () => stock.sales.reduce((a, s) => a + s.burgers, 0);
+  const entered = (id: string, until?: string) => stock.entries.filter((e) => e.item_id === id && (!until || e.date <= until)).reduce((a, e) => a + e.qty, 0);
+  const current = (it: StockItem) => it.initial + entered(it.id) - out();
+  const payNames = { efectivo: "Efectivo", transferencia: "Transferencia", mercadopago: "Mercado Pago" } as const;
+  const WEEKLY: [string, number, number, string, keyof typeof payNames][] = [
+    ["Carne", 150, 51900, "Carnicería del barrio", "efectivo"], ["Queso", 150, 34100, "Mayorista", "efectivo"],
+    ["Mayonesa", 150, 15000, "Mayorista", "efectivo"], ["Papel aluminio", 150, 36250, "Mayorista", "efectivo"],
+    ["Papel autoadhesivo", 150, 9375, "Mayorista", "efectivo"], ["Panes", 150, 30000, "Panadería", "transferencia"],
+    ["Lechuga y tomate", 150, 27500, "Verdulería", "efectivo"],
+  ];
+
+  type Col = { h: string; r?: boolean };
+  const grid = (cols: Col[], rows: string[][], foot?: string[]) => `<table class="sheet-table">
+    <thead><tr class="letters"><th></th>${cols.map((_, i) => `<th aria-hidden="true">${String.fromCharCode(65 + i)}</th>`).join("")}</tr>
+    <tr><th></th>${cols.map((c) => `<th class="${c.r ? "num" : ""}">${c.h}</th>`).join("")}</tr></thead>
+    <tbody>${rows.map((r, n) => `<tr><th class="rown">${n + 1}</th>${r.map((c, i) => `<td class="${cols[i].r ? "num" : ""}">${c}</td>`).join("")}</tr>`).join("")}</tbody>
+    ${foot ? `<tfoot><tr><th></th>${foot.map((c, i) => `<td class="${cols[i].r ? "num" : ""}">${c}</td>`).join("")}</tr></tfoot>` : ""}</table>`;
+  const cellInput = (it: StockItem, field: "initial" | "minimum" | "unit_cost", label: string) =>
+    `<input class="cell-input" type="number" min="0" step="${field === "unit_cost" ? "0.01" : "1"}" value="${it[field]}" data-item-id="${it.id}" data-item-field="${field}" aria-label="${label} de ${esc(it.name)}" />`;
+
+  const renderStock = async () => {
+    stock = await api.stockAll();
+    const { items, entries, sales } = stock;
+    const burgers = out(), income = sales.reduce((a, s) => a + s.total, 0);
+    const cv = Math.round(burgers * items.reduce((a, i) => a + i.unit_cost, 0));
+    const low = items.filter((i) => current(i) < i.minimum).length;
+    $("[data-stock-stats]").innerHTML = [["Hamburguesas vendidas", num(burgers)], ["Ingresos", money(income)], ["Costo variable", money(cv)], ["Resultado antes de costos fijos", money(income - cv)], ["Insumos a reponer", low]]
+      .map(([l, v], i) => `<div class="stat ${i === 4 && low ? "stat--alert" : ""}"><span>${l}</span><strong>${v}</strong></div>`).join("");
+    document.querySelectorAll<HTMLElement>("[data-sheet-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.sheetTab === sheet)));
+
+    let html = "", formula = "", actions = "";
+    if (sheet === "stock") {
+      formula = "Stock actual = Stock inicial + Entradas − Salidas. El estado dice REPONER cuando el stock actual queda por debajo del mínimo.";
+      actions = `<button class="button button--small button--black" data-new-item>Nuevo insumo</button>`;
+      html = grid(
+        [{ h: "Producto" }, { h: "Stock inicial", r: true }, { h: "Entradas", r: true }, { h: "Salidas", r: true }, { h: "Stock actual", r: true }, { h: "Stock mínimo", r: true }, { h: "Estado" }, { h: "Costo por hamburguesa", r: true }, { h: "" }],
+        items.map((it) => { const now = current(it), isLow = now < it.minimum; return [
+          `<strong>${esc(it.name)}</strong>`, cellInput(it, "initial", "Stock inicial"), num(entered(it.id)), num(burgers), `<strong>${num(now)}</strong>`,
+          cellInput(it, "minimum", "Stock mínimo"), `<span class="flag ${isLow ? "flag--low" : "flag--ok"}">${isLow ? "REPONER" : "OK"}</span>`,
+          cellInput(it, "unit_cost", "Costo"), `<button class="link-danger" data-del-item="${it.id}" aria-label="Eliminar ${esc(it.name)}">Quitar</button>`]; }));
+    } else if (sheet === "ventas") {
+      const key = items.find((i) => /carne/i.test(i.name)) || items[0];
+      formula = "Cada venta anotada suma a Salidas y descuenta del stock. Los pedidos de la web se anotan solos al marcarlos como entregados.";
+      actions = `<button class="button button--small button--black" data-new-sale>Registrar venta</button>`;
+      let cum = 0;
+      const rows = sales.map((s) => { cum += s.burgers; const left = key ? key.initial + entered(key.id, s.date) - cum : 0;
+        return [fdate(s.date), esc(s.customer) || "—", `${esc(s.product)}${s.order_id ? "<small>Pedido web</small>" : ""}`, num(s.burgers), money(s.price), money(s.total), key ? num(left) : "—", `<button class="link-danger" data-del-sale="${s.id}">Quitar</button>`]; });
+      html = grid([{ h: "Fecha" }, { h: "Cliente" }, { h: "Producto" }, { h: "Cantidad", r: true }, { h: "Precio", r: true }, { h: "Total", r: true }, { h: `Stock de ${key ? esc(key.name.toLowerCase()) : "carne"}`, r: true }, { h: "" }],
+        rows, sales.length ? ["<strong>TOTAL</strong>", "", "", `<strong>${num(burgers)}</strong>`, "", `<strong>${money(income)}</strong>`, `<strong>${key ? num(current(key)) : ""}</strong>`, ""] : undefined);
+    } else {
+      formula = "Cada compra anotada suma a Entradas del insumo. Los precios son lo que pagaste en total por esa compra.";
+      actions = `<button class="button button--small button--line" data-weekly>Cargar compra semanal</button><button class="button button--small button--black" data-new-entry>Registrar compra</button>`;
+      const name = (id: string) => esc(items.find((i) => i.id === id)?.name || "Insumo eliminado");
+      html = grid([{ h: "Fecha" }, { h: "Insumo" }, { h: "Cantidad", r: true }, { h: "Precio", r: true }, { h: "Proveedor" }, { h: "Cómo se paga" }, { h: "" }],
+        entries.map((e) => [fdate(e.date), `<strong>${name(e.item_id)}</strong>`, num(e.qty), money(e.price), esc(e.supplier) || "—", payNames[e.pay_method], `<button class="link-danger" data-del-entry="${e.id}">Quitar</button>`]),
+        entries.length ? ["<strong>TOTAL</strong>", "", "", `<strong>${money(entries.reduce((a, e) => a + e.price, 0))}</strong>`, "", "", ""] : undefined);
+    }
+    const empty = (sheet === "ventas" && !sales.length) ? "Todavía no hay ventas. Se anotan solas cuando entregás un pedido de la web, o podés cargarlas con “Registrar venta”."
+      : (sheet === "compras" && !entries.length) ? "Todavía no cargaste compras. Con “Cargar compra semanal” anotás de una vez la compra de 150 hamburguesas del plan de aprovisionamiento."
+      : (sheet === "stock" && !items.length) ? "No hay insumos. Agregá el primero con “Nuevo insumo”." : "";
+    $("[data-formula]").textContent = formula;
+    $("[data-sheet-actions]").innerHTML = actions;
+    $("[data-sheet]").innerHTML = html + (empty ? `<p class="sheet-empty">${empty}</p>` : "");
+  };
+
+  const today = () => todayAR();
+  const itemForm = () => openModal(`<h2>Nuevo insumo</h2>
+    <label class="field"><span>Nombre</span><input name="name" required /></label>
+    <div class="two"><label class="field"><span>Stock inicial</span><input name="initial" type="number" min="0" value="0" /></label>
+    <label class="field"><span>Stock mínimo</span><input name="minimum" type="number" min="0" value="30" /></label></div>
+    <label class="field"><span>Costo por hamburguesa (en pesos)</span><input name="unit_cost" type="number" min="0" step="0.01" value="0" /></label>`,
+    async (d) => { await api.saveStockItem({ name: String(d.get("name")), initial: Number(d.get("initial")), minimum: Number(d.get("minimum")), unit_cost: Number(d.get("unit_cost")) }); });
+  const entryForm = () => openModal(`<h2>Registrar compra</h2>
+    <div class="two"><label class="field"><span>Fecha</span><input name="date" type="date" value="${today()}" required /></label>
+    <label class="field"><span>Insumo</span><select name="itemId">${stock.items.map((i) => `<option value="${i.id}">${esc(i.name)}</option>`).join("")}</select></label></div>
+    <div class="two"><label class="field"><span>Cantidad</span><input name="qty" type="number" min="1" required /></label>
+    <label class="field"><span>Precio total pagado</span><input name="price" type="number" min="0" required /></label></div>
+    <div class="two"><label class="field"><span>Proveedor</span><input name="supplier" /></label>
+    <label class="field"><span>Cómo se paga</span><select name="payMethod"><option value="efectivo">Efectivo</option><option value="transferencia">Transferencia</option><option value="mercadopago">Mercado Pago</option></select></label></div>`,
+    async (d) => { await api.addStockEntries({ date: d.get("date"), itemId: d.get("itemId"), qty: Number(d.get("qty")), price: Number(d.get("price")), supplier: d.get("supplier"), payMethod: d.get("payMethod") }); });
+  const saleForm = async () => {
+    const prods = (await api.listProducts()).filter((p) => p.active);
+    openModal(`<h2>Registrar venta</h2>
+    <div class="two"><label class="field"><span>Fecha</span><input name="date" type="date" value="${today()}" required /></label>
+    <label class="field"><span>Cliente</span><input name="customer" /></label></div>
+    <div class="two"><label class="field"><span>Producto</span><select name="productId">${prods.map((p) => `<option value="${p.id}">${esc(p.name)} · ${money(p.price)}</option>`).join("")}</select></label>
+    <label class="field"><span>Cantidad vendida</span><input name="qty" type="number" min="1" value="1" required /></label></div>`,
+    async (d) => { await api.addSale({ date: String(d.get("date")), customer: String(d.get("customer")), productId: String(d.get("productId")), qty: Number(d.get("qty")) }); });
+  };
+  const loadWeekly = async () => {
+    if (!confirm("Esto anota la compra semanal del informe: 150 unidades de cada insumo, por $204.125 en total. ¿Cargarla?")) return;
+    const list = WEEKLY.flatMap(([n, qty, price, supplier, payMethod]) => { const it = stock.items.find((i) => i.name === n); return it ? [{ itemId: it.id, qty, price, supplier, payMethod }] : []; });
+    if (!list.length) return alert("No se encontraron los insumos del informe. Cargá las compras una por una.");
+    await api.addStockEntries(list); renderStock();
+  };
+  document.addEventListener("change", async (e) => {
+    const t = e.target as HTMLInputElement, f = t.dataset?.itemField;
+    if (!f) return;
+    try {
+      const it = stock.items.find((i) => i.id === t.dataset.itemId)!;
+      await api.saveStockItem({ ...it, [f]: Math.max(0, Number(t.value) || 0) }); renderStock();
+    } catch (err) { alert((err as Error).message); renderStock(); }
+  });
 
   // ---- Formularios en ventana ----
   const modal = $<HTMLDialogElement>("[data-modal]"), mform = $<HTMLFormElement>("[data-modal-form]");
@@ -198,8 +327,9 @@ import { burgerfit } from "../data/burgerfit";
     if (d.tab) {
       document.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b === t)));
       document.querySelectorAll<HTMLElement>("[data-panel]").forEach((p) => (p.hidden = p.dataset.panel !== d.tab));
+      if (d.tab === "stock") renderStock();
     } else if (d.filter) { filter = d.filter; renderOrders(); }
-    else if (d.status) { const [id, st] = d.status.split(":"); if (st !== "cancelado" || confirm("¿Cancelar este pedido?")) { await api.updateOrder(id, { status: st as OrderStatus }); renderOrders(); } }
+    else if (d.status) { const [id, st] = d.status.split(":"); if (st !== "cancelado" || confirm("¿Cancelar este pedido?")) { await api.updateOrder(id, { status: st as OrderStatus }); renderOrders(); if (isAdmin) renderStock(); } }
     else if (d.paid) { const o = (await api.listOrders()).find((x) => x.id === d.paid)!; await api.updateOrder(o.id, { paid: !o.payment.paid }); renderOrders(); }
     else if (d.delOrder) { if (confirm("¿Eliminar este pedido para siempre?")) { await api.deleteOrder(d.delOrder); renderOrders(); } }
     else if (d.new === "product") productForm();
@@ -210,6 +340,14 @@ import { burgerfit } from "../data/burgerfit";
     else if (d.toggleUser) { const u = (await api.listUsers()).find((x) => x.id === d.toggleUser)!; await api.saveUser({ ...u, active: !u.active }); renderUsers(); }
     else if (d.delProduct) { if (confirm("¿Eliminar esta publicación?")) { await api.deleteProduct(d.delProduct); renderProducts(); } }
     else if (d.delUser) { const me = await api.currentUser(); if (me?.id === d.delUser) return alert("No podés eliminar tu propio usuario."); if (confirm("¿Eliminar este usuario?")) { await api.deleteUser(d.delUser); renderUsers(); } }
+    else if (d.sheetTab) { sheet = d.sheetTab as typeof sheet; renderStock(); }
+    else if (d.newItem !== undefined) itemForm();
+    else if (d.newEntry !== undefined) entryForm();
+    else if (d.newSale !== undefined) await saleForm();
+    else if (d.weekly !== undefined) await loadWeekly();
+    else if (d.delItem) { if (confirm("¿Quitar este insumo? También se borran sus compras.")) { await api.deleteStockItem(d.delItem); renderStock(); } }
+    else if (d.delEntry) { if (confirm("¿Quitar esta compra? Baja las entradas del insumo.")) { await api.deleteStockEntry(d.delEntry); renderStock(); } }
+    else if (d.delSale) { if (confirm("¿Quitar esta venta? El stock vuelve a subir.")) { await api.deleteSale(d.delSale); renderStock(); } }
     else if (d.logout !== undefined) { await api.logout(); start(); }
   };
 
@@ -228,7 +366,7 @@ import { burgerfit } from "../data/burgerfit";
     const me = await api.currentUser();
     isAdmin = me?.role === "admin";
     $("[data-login]").hidden = !!me; $("[data-admin]").hidden = !me;
-    document.querySelectorAll<HTMLElement>('[data-tab="products"],[data-tab="users"]').forEach((b) => (b.hidden = !isAdmin));
+    document.querySelectorAll<HTMLElement>('[data-tab="products"],[data-tab="users"],[data-tab="stock"]').forEach((b) => (b.hidden = !isAdmin));
     document.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === "orders")));
     document.querySelectorAll<HTMLElement>("[data-panel]").forEach((p) => (p.hidden = p.dataset.panel !== "orders"));
     if (me) { $("[data-whoami]").textContent = me.name; refreshAll(); }
