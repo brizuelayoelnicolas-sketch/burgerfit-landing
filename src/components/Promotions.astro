@@ -7,7 +7,7 @@ import { burgerfit } from "../data/burgerfit";
     <div class="section-heading promotions-heading">
       <p class="eyebrow"><span class="eyebrow-dot"></span> Para compartir</p>
       <h2>Las promos <span>de Burgerfit.</span></h2>
-      <p>Elegí tu combo y escribinos por Instagram.</p>
+      <p>Elegí tu combo y hacé el pedido desde acá.</p>
     </div>
 
     <div class="offer-list">
@@ -20,9 +20,9 @@ import { burgerfit } from "../data/burgerfit";
           <div class="offer-meta">
             <span class="offer-label">Promo Burgerfit</span>
             <p class="offer-price">{promotion.price}</p>
-            <a class="button button--yellow" href={burgerfit.instagram.url} target="_blank" rel="noreferrer">
+            <button class="button button--yellow" type="button" data-order={`combo-${promotion.quantity}`}>
               Pedir {promotion.quantity} <span aria-hidden="true">↗</span>
-            </a>
+            </button>
           </div>
           <span class="offer-spark offer-spark--a" aria-hidden="true">✳</span>
           <span class="offer-spark offer-spark--b" aria-hidden="true">✳</span>

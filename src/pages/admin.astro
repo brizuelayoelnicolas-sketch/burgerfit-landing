@@ -1,0 +1,230 @@
+---
+import MainLayout from "../layouts/MainLayout.astro";
+import { burgerfit } from "../data/burgerfit";
+---
+
+<MainLayout title="Administración | Burgerfit" description="Panel de gestión de Burgerfit.">
+  <meta name="robots" content="noindex,nofollow" slot="head" />
+
+  <section class="login" data-login hidden>
+    <form class="login-card" data-login-form>
+      <img src={burgerfit.images.mascot} alt="" width="72" height="72" />
+      <h1>Panel Burgerfit</h1>
+      <p>Ingresá para gestionar pedidos, productos y usuarios.</p>
+      <label class="field"><span>Usuario</span><input name="user" autocomplete="username" required /></label>
+      <label class="field"><span>Contraseña</span><input name="pass" type="password" autocomplete="current-password" required /></label>
+      <p class="form-error" role="alert" data-login-error hidden></p>
+      <button class="button button--yellow" type="submit">Ingresar</button>
+      <a class="login-back" href="/">Volver a la web</a>
+    </form>
+  </section>
+
+  <div class="admin" data-admin hidden>
+    <header class="admin-bar">
+      <div class="container admin-bar__inner">
+        <a class="brand-lockup" href="/" aria-label="Ir a la web">
+          <img class="brand-lockup__image" src={burgerfit.images.mascot} alt="" width="44" height="44" />
+          <span class="brand-lockup__name">Burger<span>fit</span> <small>Administración</small></span>
+        </a>
+        <div class="admin-bar__right">
+          <span data-whoami></span>
+          <a class="button button--small button--text" href="/">Ver la web</a>
+          <button class="button button--small button--yellow" type="button" data-logout>Salir</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container admin-main">
+      <div class="stats" data-stats></div>
+
+      <div class="tabs" role="tablist" aria-label="Secciones">
+        <button role="tab" aria-selected="true" data-tab="orders">Pedidos</button>
+        <button role="tab" aria-selected="false" data-tab="products">Productos y combos</button>
+        <button role="tab" aria-selected="false" data-tab="users">Usuarios</button>
+      </div>
+
+      <section data-panel="orders">
+        <div class="filters" data-filters></div>
+        <div class="order-grid" data-orders></div>
+      </section>
+
+      <section data-panel="products" hidden>
+        <div class="panel-head"><h2>Productos y combos</h2><button class="button button--small button--black" type="button" data-new="product">Nueva publicación</button></div>
+        <div class="table-wrap" data-products></div>
+      </section>
+
+      <section data-panel="users" hidden>
+        <div class="panel-head"><h2>Usuarios del panel</h2><button class="button button--small button--black" type="button" data-new="user">Nuevo usuario</button></div>
+        <div class="table-wrap" data-users></div>
+      </section>
+    </main>
+
+    <dialog class="modal" data-modal>
+      <form method="dialog" class="modal-form" data-modal-form></form>
+    </dialog>
+  </div>
+</MainLayout>
+
+<script>
+  import { api, money, type Order, type OrderStatus, type Product, type User } from "../lib/store";
+
+  const $ = <T extends HTMLElement>(s: string) => document.querySelector<T>(s)!;
+  const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  const when = (iso: string) => new Date(iso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+  const methodLabel = { envio: "Envío a domicilio", retiro: "Retiro por casa", colegio: "Entrega en el colegio" } as const;
+  const payLabel = { efectivo: "Efectivo", transferencia: "Transferencia", mercadopago: "Mercado Pago" } as const;
+  const statusLabel = (o: Order) => ({
+    pendiente: "Pendiente", preparando: "En preparación",
+    listo: o.delivery.method === "retiro" ? "Listo para retirar" : "Listo para entregar",
+    entregado: "Entregado", cancelado: "Cancelado",
+  })[o.status];
+  const nextStep: Partial<Record<OrderStatus, [OrderStatus, string]>> = {
+    pendiente: ["preparando", "Empezar a preparar"], preparando: ["listo", "Marcar listo"], listo: ["entregado", "Marcar entregado"],
+  };
+  const filters: [string, string, (o: Order) => boolean][] = [
+    ["todos", "Todos", () => true],
+    ["pendiente", "Pendientes", (o) => o.status === "pendiente"],
+    ["preparando", "En preparación", (o) => o.status === "preparando"],
+    ["listo", "Para entregar", (o) => o.status === "listo"],
+    ["entregado", "Entregados", (o) => o.status === "entregado"],
+    ["cancelado", "Cancelados", (o) => o.status === "cancelado"],
+  ];
+  let filter = "todos";
+
+  const destination = (o: Order) => {
+    const d = o.delivery;
+    if (d.method === "retiro") return `<strong>Retira en casa</strong>`;
+    if (d.method === "colegio") return `<strong>${esc(d.schoolInfo)}</strong>`;
+    const q = encodeURIComponent(`${d.address}, ${d.zone}`);
+    return `<strong>${esc(d.address)}, ${esc(d.zone)}</strong>${d.reference ? `<small>${esc(d.reference)}</small>` : ""}
+      <a href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noreferrer">Ver en el mapa</a>`;
+  };
+
+  const renderStats = (orders: Order[]) => {
+    const today = new Date().toDateString();
+    const sold = orders.filter((o) => o.status !== "cancelado" && new Date(o.createdAt).toDateString() === today);
+    const cells = [
+      ["Pendientes", orders.filter((o) => o.status === "pendiente").length],
+      ["En preparación", orders.filter((o) => o.status === "preparando").length],
+      ["Para entregar", orders.filter((o) => o.status === "listo").length],
+      ["Ventas de hoy", money(sold.reduce((a, o) => a + o.total, 0))],
+      ["Por cobrar", money(orders.filter((o) => !o.payment.paid && !["cancelado", "entregado"].includes(o.status) || (o.status === "entregado" && !o.payment.paid)).reduce((a, o) => a + o.total, 0))],
+    ];
+    $("[data-stats]").innerHTML = cells.map(([l, v]) => `<div class="stat"><span>${l}</span><strong>${v}</strong></div>`).join("");
+  };
+
+  const renderOrders = async () => {
+    const orders = await api.listOrders();
+    renderStats(orders);
+    $("[data-filters]").innerHTML = filters.map(([id, label, fn]) =>
+      `<button class="chip" aria-pressed="${filter === id}" data-filter="${id}">${label} <b>${orders.filter(fn).length}</b></button>`).join("");
+    const fn = filters.find((f) => f[0] === filter)![2];
+    const shown = orders.filter(fn);
+    $("[data-orders]").innerHTML = shown.length ? shown.map((o) => {
+      const step = nextStep[o.status];
+      const closed = o.status === "entregado" || o.status === "cancelado";
+      return `<article class="order order--${o.status}">
+        <header><div><h3>Pedido N° ${o.number}</h3><small>${when(o.createdAt)}</small></div><span class="badge badge--${o.status}">${statusLabel(o)}</span></header>
+        <p class="order-items">${o.items.map((i) => `${i.qty} × ${esc(i.name)}`).join(", ")}</p>
+        <dl>
+          <div><dt>Cliente</dt><dd><strong>${esc(o.customer.name)}</strong><a href="tel:${esc(o.customer.phone)}">${esc(o.customer.phone)}</a>${o.customer.email ? `<small>${esc(o.customer.email)}</small>` : ""}</dd></div>
+          <div><dt>${methodLabel[o.delivery.method]}</dt><dd>${destination(o)}</dd></div>
+          <div><dt>Pago</dt><dd><strong>${payLabel[o.payment.method]} · ${money(o.total)}</strong>
+            <small>${o.payment.paid ? "Cobrado" : "Sin cobrar"}${o.payment.cashWith ? ` · abona con ${money(o.payment.cashWith)} (vuelto ${money(Math.max(0, o.payment.cashWith - o.total))})` : ""}</small></dd></div>
+          ${o.notes ? `<div><dt>Aclaraciones</dt><dd>${esc(o.notes)}</dd></div>` : ""}
+        </dl>
+        <footer>
+          ${step ? `<button class="button button--small button--black" data-status="${o.id}:${step[0]}">${step[1]}</button>` : ""}
+          <button class="button button--small button--line" data-paid="${o.id}">${o.payment.paid ? "Marcar sin cobrar" : "Marcar cobrado"}</button>
+          ${!closed ? `<button class="link-danger" data-status="${o.id}:cancelado">Cancelar</button>` : `<button class="link-danger" data-del-order="${o.id}">Eliminar</button>`}
+        </footer></article>`;
+    }).join("") : `<p class="empty">No hay pedidos en esta vista. Cuando alguien pida desde la web, va a aparecer acá.</p>`;
+  };
+
+  const renderProducts = async () => {
+    const rows = await api.listProducts();
+    $("[data-products]").innerHTML = rows.length ? `<table><thead><tr><th>Publicación</th><th>Tipo</th><th>Incluye</th><th>Precio</th><th>En la web</th><th></th></tr></thead><tbody>${rows.map((p) =>
+      `<tr><td><strong>${esc(p.name)}</strong><small>${esc(p.description)}</small></td><td>${p.kind === "combo" ? "Combo" : "Unidad"}</td><td>${p.qty}</td><td>${money(p.price)}</td>
+       <td><button class="switch" role="switch" aria-checked="${p.active}" aria-label="Publicar ${esc(p.name)}" data-toggle-product="${p.id}"></button></td>
+       <td class="row-actions"><button data-edit-product="${p.id}">Editar</button><button class="link-danger" data-del-product="${p.id}">Eliminar</button></td></tr>`).join("")}</tbody></table>`
+      : `<p class="empty">Todavía no hay publicaciones. Creá la primera con “Nueva publicación”.</p>`;
+  };
+
+  const renderUsers = async () => {
+    const rows = await api.listUsers();
+    $("[data-users]").innerHTML = `<table><thead><tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Activo</th><th></th></tr></thead><tbody>${rows.map((u) =>
+      `<tr><td><strong>${esc(u.name)}</strong></td><td>${esc(u.username)}</td><td>${{ admin: "Administrador", cocina: "Cocina", reparto: "Reparto" }[u.role]}</td>
+       <td><button class="switch" role="switch" aria-checked="${u.active}" aria-label="Activar ${esc(u.name)}" data-toggle-user="${u.id}"></button></td>
+       <td class="row-actions"><button data-edit-user="${u.id}">Editar</button><button class="link-danger" data-del-user="${u.id}">Eliminar</button></td></tr>`).join("")}</tbody></table>`;
+  };
+
+  const refreshAll = () => Promise.all([renderOrders(), renderProducts(), renderUsers()]);
+
+  // ---- Formularios en ventana ----
+  const modal = $<HTMLDialogElement>("[data-modal]"), mform = $<HTMLFormElement>("[data-modal-form]");
+  let onSave: ((d: FormData) => Promise<void>) | null = null;
+  const actions = `<footer><button type="button" class="button button--small button--line" data-cancel>Cancelar</button><button class="button button--small button--black" value="save">Guardar</button></footer>`;
+  const openModal = (html: string, save: (d: FormData) => Promise<void>) => { mform.innerHTML = html + actions; onSave = save; modal.showModal(); };
+  mform.addEventListener("click", (e) => { if ((e.target as HTMLElement).matches("[data-cancel]")) modal.close(); });
+  mform.addEventListener("submit", async (e) => { e.preventDefault(); try { if (onSave) await onSave(new FormData(mform)); modal.close(); refreshAll(); } catch (err) { alert((err as Error).message); } });
+
+  const productForm = (p?: Product) => openModal(`<h2>${p ? "Editar publicación" : "Nueva publicación"}</h2>
+    <label class="field"><span>Nombre</span><input name="name" value="${esc(p?.name)}" required /></label>
+    <label class="field"><span>Descripción</span><input name="description" value="${esc(p?.description)}" /></label>
+    <div class="two"><label class="field"><span>Tipo</span><select name="kind"><option value="unidad" ${p?.kind === "unidad" ? "selected" : ""}>Unidad</option><option value="combo" ${p?.kind !== "unidad" ? "selected" : ""}>Combo</option></select></label>
+    <label class="field"><span>Hamburguesas que incluye</span><input name="qty" type="number" min="1" value="${p?.qty ?? 1}" required /></label></div>
+    <label class="field"><span>Precio (en pesos)</span><input name="price" type="number" min="0" value="${p?.price ?? ""}" required /></label>
+    <label class="check"><input type="checkbox" name="active" ${p?.active !== false ? "checked" : ""} /> Visible en la web</label>`,
+    async (d) => { await api.saveProduct({ ...(p ? { id: p.id } : {}), name: String(d.get("name")), description: String(d.get("description")), kind: d.get("kind") as Product["kind"], qty: Number(d.get("qty")), price: Number(d.get("price")), active: d.has("active") }); });
+
+  const userForm = (u?: User) => openModal(`<h2>${u ? "Editar usuario" : "Nuevo usuario"}</h2>
+    <label class="field"><span>Nombre</span><input name="name" value="${esc(u?.name)}" required /></label>
+    <div class="two"><label class="field"><span>Usuario</span><input name="username" value="${esc(u?.username)}" required /></label>
+    <label class="field"><span>Rol</span><select name="role">${(["admin", "cocina", "reparto"] as const).map((r) => `<option value="${r}" ${(u?.role ?? "cocina") === r ? "selected" : ""}>${{ admin: "Administrador", cocina: "Cocina", reparto: "Reparto" }[r]}</option>`).join("")}</select></label></div>
+    <label class="field"><span>Contraseña ${u ? "<em>(vacía para no cambiarla)</em>" : ""}</span><input name="password" type="password" ${u ? "" : "required"} autocomplete="new-password" /></label>
+    <label class="check"><input type="checkbox" name="active" ${u?.active !== false ? "checked" : ""} /> Puede ingresar al panel</label>`,
+    async (d) => { await api.saveUser({ ...(u ? { id: u.id } : {}), name: String(d.get("name")), username: String(d.get("username")), role: d.get("role") as User["role"], password: String(d.get("password")) || undefined, active: d.has("active") }); });
+
+  // ---- Eventos ----
+  document.addEventListener("click", async (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>("button");
+    if (!t) return;
+    try { await onClick(t); } catch (err) { alert((err as Error).message); }
+  });
+  const onClick = async (t: HTMLElement) => {
+    const d = t.dataset;
+    if (d.tab) {
+      document.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b === t)));
+      document.querySelectorAll<HTMLElement>("[data-panel]").forEach((p) => (p.hidden = p.dataset.panel !== d.tab));
+    } else if (d.filter) { filter = d.filter; renderOrders(); }
+    else if (d.status) { const [id, st] = d.status.split(":"); if (st !== "cancelado" || confirm("¿Cancelar este pedido?")) { await api.updateOrder(id, { status: st as OrderStatus }); renderOrders(); } }
+    else if (d.paid) { const o = (await api.listOrders()).find((x) => x.id === d.paid)!; await api.updateOrder(o.id, { paid: !o.payment.paid }); renderOrders(); }
+    else if (d.delOrder) { if (confirm("¿Eliminar este pedido para siempre?")) { await api.deleteOrder(d.delOrder); renderOrders(); } }
+    else if (d.new === "product") productForm();
+    else if (d.new === "user") userForm();
+    else if (d.editProduct) productForm((await api.listProducts()).find((p) => p.id === d.editProduct));
+    else if (d.editUser) userForm((await api.listUsers()).find((u) => u.id === d.editUser));
+    else if (d.toggleProduct) { const p = (await api.listProducts()).find((x) => x.id === d.toggleProduct)!; await api.saveProduct({ ...p, active: !p.active }); renderProducts(); }
+    else if (d.toggleUser) { const u = (await api.listUsers()).find((x) => x.id === d.toggleUser)!; await api.saveUser({ ...u, active: !u.active }); renderUsers(); }
+    else if (d.delProduct) { if (confirm("¿Eliminar esta publicación?")) { await api.deleteProduct(d.delProduct); renderProducts(); } }
+    else if (d.delUser) { const me = await api.currentUser(); if (me?.id === d.delUser) return alert("No podés eliminar tu propio usuario."); if (confirm("¿Eliminar este usuario?")) { await api.deleteUser(d.delUser); renderUsers(); } }
+    else if (d.logout !== undefined) { await api.logout(); start(); }
+  };
+
+  $<HTMLFormElement>("[data-login-form]").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target as HTMLFormElement;
+    const u = await api.login((f.elements.namedItem("user") as HTMLInputElement).value.trim(), (f.elements.namedItem("pass") as HTMLInputElement).value);
+    const err = $("[data-login-error]");
+    err.hidden = !!u; err.textContent = "Usuario o contraseña incorrectos.";
+    if (u) { f.reset(); start(); }
+  });
+
+  const start = async () => {
+    const me = await api.currentUser();
+    $("[data-login]").hidden = !!me; $("[data-admin]").hidden = !me;
+    if (me) { $("[data-whoami]").textContent = me.name; refreshAll(); }
+  };
+  start();
+</script>

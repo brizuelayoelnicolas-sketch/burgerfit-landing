@@ -1,0 +1,172 @@
+---
+import { burgerfit } from "../data/burgerfit";
+---
+
+<div class="drawer-overlay" data-drawer-overlay hidden></div>
+<aside class="drawer" id="pedido" role="dialog" aria-modal="true" aria-labelledby="drawer-title" aria-hidden="true" data-drawer>
+  <header class="drawer-head">
+    <div>
+      <h2 id="drawer-title">Tu pedido</h2>
+      <p class="drawer-sub">Completá tus datos y lo preparamos.</p>
+    </div>
+    <button type="button" class="drawer-close" aria-label="Cerrar pedido" data-drawer-close>✕</button>
+  </header>
+
+  <form class="drawer-form" data-order-form novalidate>
+    <fieldset>
+      <legend>Qué querés pedir</legend>
+      <div class="choice-list" data-product-list></div>
+      <label class="field field--qty">
+        <span data-qty-label>Cantidad</span>
+        <div class="stepper">
+          <button type="button" data-qty="-1" aria-label="Menos">−</button>
+          <output data-qty-out>1</output>
+          <button type="button" data-qty="1" aria-label="Más">+</button>
+        </div>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Tus datos</legend>
+      <label class="field"><span>Nombre y apellido</span><input name="name" autocomplete="name" required /></label>
+      <label class="field"><span>Teléfono / WhatsApp</span><input name="phone" type="tel" autocomplete="tel" inputmode="tel" required /></label>
+      <label class="field"><span>Correo electrónico <em>(opcional)</em></span><input name="email" type="email" autocomplete="email" /></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cómo lo recibís</legend>
+      <div class="choice-row">
+        <label class="choice"><input type="radio" name="method" value="envio" checked /><span>Envío a domicilio</span></label>
+        <label class="choice"><input type="radio" name="method" value="retiro" /><span>Retiro por casa</span></label>
+        <label class="choice"><input type="radio" name="method" value="colegio" /><span>En el colegio</span></label>
+      </div>
+      <div data-when="envio">
+        <label class="field"><span>Dirección (calle y número)</span><input name="address" autocomplete="street-address" /></label>
+        <label class="field"><span>Barrio o zona</span><input name="zone" /></label>
+        <label class="field"><span>Referencias <em>(timbre, piso, entre calles)</em></span><input name="reference" /></label>
+      </div>
+      <div data-when="colegio" hidden>
+        <label class="field"><span>Colegio, curso y recreo</span><input name="school" placeholder="Ej: Escuela N° 5, 4° B, segundo recreo" /></label>
+      </div>
+      <p class="hint" data-when="retiro" hidden>Te avisamos por mensaje cuando esté listo para retirar.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Cómo pagás</legend>
+      <div class="choice-row">
+        {burgerfit.payments.map((p, i) => (
+          <label class="choice"><input type="radio" name="payment" value={["efectivo", "transferencia", "mercadopago"][i]} checked={i === 0} /><span>{p}</span></label>
+        ))}
+      </div>
+      <label class="field" data-when-pay="efectivo"><span>¿Con cuánto abonás? <em>(para llevarte el vuelto)</em></span><input name="cashWith" type="number" min="0" inputmode="numeric" /></label>
+      <p class="hint" data-when-pay="transferencia" hidden>Te pasamos el alias por mensaje al confirmar el pedido.</p>
+      <p class="hint" data-when-pay="mercadopago" hidden>Te enviamos el link de pago por mensaje al confirmar.</p>
+    </fieldset>
+
+    <label class="field"><span>Aclaraciones <em>(ej: sin tomate)</em></span><textarea name="notes" rows="2"></textarea></label>
+
+    <p class="form-error" role="alert" data-error hidden></p>
+
+    <footer class="drawer-foot">
+      <div class="total"><span>Total</span><strong data-total>$0</strong></div>
+      <button class="button button--yellow" type="submit">Confirmar pedido</button>
+    </footer>
+  </form>
+
+  <div class="drawer-done" data-done hidden>
+    <p class="done-mark" aria-hidden="true">✓</p>
+    <h2>¡Pedido recibido!</h2>
+    <p data-done-text></p>
+    <button class="button button--black" type="button" data-drawer-close>Listo</button>
+  </div>
+</aside>
+
+<script>
+  import { api, money, productKey, type DeliveryMethod, type PaymentMethod, type Product } from "../lib/store";
+
+  const $ = <T extends HTMLElement>(s: string, r: ParentNode = document) => r.querySelector<T>(s)!;
+  const drawer = $("[data-drawer]"), overlay = $("[data-drawer-overlay]");
+  const form = $<HTMLFormElement>("[data-order-form]"), done = $("[data-done]");
+  const list = $("[data-product-list]"), qtyOut = $("[data-qty-out]"), totalEl = $("[data-total]"), errEl = $("[data-error]");
+  let products: Product[] = [], selected: Product | null = null, qty = 1, lastFocus: HTMLElement | null = null;
+
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  const val = (n: string) => (form.elements.namedItem(n) as HTMLInputElement).value.trim();
+  const checked = (n: string) => (form.querySelector(`[name=${n}]:checked`) as HTMLInputElement).value;
+
+  const refresh = () => {
+    qtyOut.textContent = String(qty);
+    totalEl.textContent = money((selected?.price || 0) * qty);
+    $("[data-qty-label]").textContent = selected?.kind === "combo" ? "Cantidad de combos" : "Cantidad de hamburguesas";
+    const m = checked("method"), p = checked("payment");
+    form.querySelectorAll<HTMLElement>("[data-when]").forEach((e) => (e.hidden = e.dataset.when !== m));
+    form.querySelectorAll<HTMLElement>("[data-when-pay]").forEach((e) => (e.hidden = e.dataset.whenPay !== p));
+  };
+
+  const renderProducts = () => {
+    list.innerHTML = products.map((p) => `
+      <label class="choice choice--product"><input type="radio" name="product" value="${p.id}" ${p.id === selected?.id ? "checked" : ""} />
+      <span><strong>${esc(p.name)}</strong><small>${money(p.price)}</small></span></label>`).join("");
+  };
+
+  const open = async (productId?: string) => {
+    products = await api.listProducts(true).catch(() => []);
+    selected = products.find((p) => productKey(p) === productId) || products[0] || null;
+    qty = 1; errEl.hidden = true; form.hidden = false; done.hidden = true;
+    renderProducts(); refresh();
+    lastFocus = document.activeElement as HTMLElement;
+    overlay.hidden = false; drawer.classList.add("is-open"); drawer.setAttribute("aria-hidden", "false");
+    document.body.classList.add("menu-open");
+    setTimeout(() => $<HTMLElement>("[data-drawer-close]").focus(), 50);
+  };
+  const close = () => {
+    drawer.classList.remove("is-open"); drawer.setAttribute("aria-hidden", "true"); overlay.hidden = true;
+    document.body.classList.remove("menu-open"); lastFocus?.focus();
+  };
+
+  document.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest<HTMLElement>("[data-order]");
+    if (t) { e.preventDefault(); open(t.dataset.order); }
+  });
+  document.querySelectorAll("[data-drawer-close]").forEach((b) => b.addEventListener("click", close));
+  overlay.addEventListener("click", close);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && drawer.classList.contains("is-open")) close(); });
+
+  form.addEventListener("change", (e) => {
+    const t = e.target as HTMLInputElement;
+    if (t.name === "product") selected = products.find((p) => p.id === t.value) || selected;
+    refresh();
+  });
+  form.querySelectorAll<HTMLButtonElement>("[data-qty]").forEach((b) =>
+    b.addEventListener("click", () => { qty = Math.min(20, Math.max(1, qty + Number(b.dataset.qty))); refresh(); }));
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const method = checked("method") as DeliveryMethod, pay = checked("payment") as PaymentMethod;
+    let msg = "";
+    if (!selected) msg = "No hay productos disponibles por ahora.";
+    else if (val("name").length < 3) msg = "Escribí tu nombre y apellido.";
+    else if (val("phone").replace(/\D/g, "").length < 8) msg = "Ingresá un teléfono válido para avisarte del pedido.";
+    else if (val("email") && !/^\S+@\S+\.\S+$/.test(val("email"))) msg = "El correo no parece válido. Revisalo o dejalo vacío.";
+    else if (method === "envio" && (val("address").length < 4 || !val("zone"))) msg = "Para el envío necesitamos dirección y barrio.";
+    else if (method === "colegio" && val("school").length < 4) msg = "Indicá colegio, curso y recreo.";
+    errEl.hidden = !msg; errEl.textContent = msg;
+    if (msg) return;
+
+    const btn = form.querySelector<HTMLButtonElement>("[type=submit]")!;
+    btn.disabled = true;
+    try {
+    const order = await api.createOrder({
+      customer: { name: val("name"), phone: val("phone"), email: val("email") },
+      items: [{ productId: selected!.id, name: selected!.name, qty, unitPrice: selected!.price }],
+      delivery: { method, address: val("address"), zone: val("zone"), reference: val("reference"), schoolInfo: val("school") },
+      payment: { method: pay, cashWith: pay === "efectivo" && val("cashWith") ? Number(val("cashWith")) : null, paid: false },
+      notes: val("notes"), total: selected!.price * qty,
+    });
+    form.reset(); form.hidden = true; done.hidden = false;
+    $("[data-done-text]").textContent = `Tu pedido N° ${order.number} por ${money(order.total)} quedó registrado. Te escribimos al ${order.customer.phone} para confirmarlo.`;
+    } catch (err) {
+      errEl.hidden = false; errEl.textContent = (err as Error).message;
+    } finally { btn.disabled = false; }
+  });
+</script>

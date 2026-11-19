@@ -35,9 +35,9 @@ import { burgerfit } from "../data/burgerfit";
         <ul class="ingredient-list" aria-label="Ingredientes">
           {burgerfit.product.ingredients.map((ingredient) => <li>{ingredient}</li>)}
         </ul>
-        <a class="button button--black" href={burgerfit.instagram.url} target="_blank" rel="noreferrer">
+        <button class="button button--black" type="button" data-order="unidad">
           Pedí la tuya <span aria-hidden="true">↗</span>
-        </a>
+        </button>
       </div>
     </div>
   </div>
