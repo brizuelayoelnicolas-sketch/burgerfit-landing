@@ -26,3 +26,7 @@ import Footer from "../components/Footer.astro";
   <Footer />
   <OrderDrawer />
 </MainLayout>
+
+<script>
+  fetch("/api/auth/logout", { method: "POST", keepalive: true }).catch(() => {});
+</script>

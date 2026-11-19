@@ -35,7 +35,7 @@ export const verify = (p: string, h: string) => bcrypt.compare(p, h);
 // Sesión: cookie "id.expira.firma" firmada con HMAC
 const secret = () => env("SESSION_SECRET") || url;
 const sign = (v: string) => createHmac("sha256", secret()).update(v).digest("base64url");
-export const makeToken = (userId: string) => { const v = `${userId}.${Date.now() + 12 * 3600e3}`; return `${v}.${sign(v)}`; };
+export const makeToken = (userId: string) => { const v = `${userId}.${Date.now() + 2 * 3600e3}`; return `${v}.${sign(v)}`; };
 export const readToken = (t?: string): string | null => {
   if (!t) return null;
   const [id, exp, sig] = t.split(".");

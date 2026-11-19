@@ -21,6 +21,7 @@ const oneOf = <T extends string>(v: unknown, list: readonly T[]): T | null => (l
 
 const handler: APIRoute = async ({ request, params, cookies }) => {
   try {
+    if (params.route === "auth/logout") { cookies.delete("bf_session", { path: "/" }); return json({ ok: true }); }
     await ensureSchema();
     const [res, id] = (params.route || "").split("/");
     const m = request.method;
@@ -38,17 +39,16 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
       if (id === "login" && m === "POST") {
         const r = (await q("select * from users where username = $1 and active", [str(body.username, 60)]))[0];
         if (!r || !(await verify(String(body.password || ""), r.password_hash))) return fail("Usuario o contraseña incorrectos.", 401);
-        cookies.set("bf_session", makeToken(r.id), { httpOnly: true, sameSite: "lax", secure: import.meta.env.PROD, path: "/", maxAge: 12 * 3600 });
+        cookies.set("bf_session", makeToken(r.id), { httpOnly: true, sameSite: "lax", secure: import.meta.env.PROD, path: "/" }); // cookie de sesión: se borra al cerrar el navegador
         return json(user(r));
       }
-      if (id === "logout") { cookies.delete("bf_session", { path: "/" }); return json({ ok: true }); }
       return json(await me());
     }
 
     // --- Público: catálogo y crear pedido ---
     if (res === "products" && m === "GET" && !id) {
       const admin = await me();
-      const all = admin && new URL(request.url).searchParams.get("all");
+      const all = admin?.role === "admin" && new URL(request.url).searchParams.get("all");
       const rows = await q(`select * from products ${all ? "" : "where active"} order by kind desc, qty`);
       return json(rows.map(product));
     }
@@ -77,6 +77,7 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
     const admin = await me();
     if (!admin) return fail("Iniciá sesión para continuar.", 401);
 
+    const isAdmin = admin.role === "admin";
     if (res === "orders") {
       if (m === "GET") {
         const rows = await q("select * from orders order by number desc limit 500");
@@ -86,13 +87,16 @@ const handler: APIRoute = async ({ request, params, cookies }) => {
       if (m === "PATCH" && id) {
         const st = body.status === undefined ? null : oneOf(body.status, ["pendiente", "preparando", "listo", "entregado", "cancelado"] as const);
         if (body.status !== undefined && !st) return fail("Estado inválido.");
+        // Cocina y reparto solo avanzan el pedido; cancelar y cobrar es de administración
+        if (!isAdmin && (body.paid !== undefined || !st || !["preparando", "listo", "entregado"].includes(st))) return fail("No tenés permiso para esta acción.", 403);
         await q("update orders set status = coalesce($2, status), paid = coalesce($3::boolean, paid), updated_at = now() where id = $1", [id, st, typeof body.paid === "boolean" ? body.paid : null]);
         return json({ ok: true });
       }
-      if (m === "DELETE" && id) { await q("delete from orders where id = $1", [id]); return json({ ok: true }); }
+      if (m === "DELETE" && id) { if (!isAdmin) return fail("No tenés permiso para esta acción.", 403); await q("delete from orders where id = $1", [id]); return json({ ok: true }); }
     }
 
     if (res === "products") {
+      if (!isAdmin) return fail("Solo un administrador puede gestionar los productos.", 403);
       if (m === "POST" || (m === "PUT" && id)) {
         const kind = oneOf(body.kind, ["unidad", "combo"] as const);
         if (str(body.name).length < 2 || !kind) return fail("Completá nombre y tipo.");

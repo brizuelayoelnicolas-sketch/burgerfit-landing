@@ -91,6 +91,7 @@ import { burgerfit } from "../data/burgerfit";
     ["cancelado", "Cancelados", (o) => o.status === "cancelado"],
   ];
   let filter = "todos";
+  let isAdmin = false;
 
   const destination = (o: Order) => {
     const d = o.delivery;
@@ -111,7 +112,7 @@ import { burgerfit } from "../data/burgerfit";
       ["Ventas de hoy", money(sold.reduce((a, o) => a + o.total, 0))],
       ["Por cobrar", money(orders.filter((o) => !o.payment.paid && !["cancelado", "entregado"].includes(o.status) || (o.status === "entregado" && !o.payment.paid)).reduce((a, o) => a + o.total, 0))],
     ];
-    $("[data-stats]").innerHTML = cells.map(([l, v]) => `<div class="stat"><span>${l}</span><strong>${v}</strong></div>`).join("");
+    $("[data-stats]").innerHTML = (isAdmin ? cells : cells.slice(0, 3)).map(([l, v]) => `<div class="stat"><span>${l}</span><strong>${v}</strong></div>`).join("");
   };
 
   const renderOrders = async () => {
@@ -136,8 +137,8 @@ import { burgerfit } from "../data/burgerfit";
         </dl>
         <footer>
           ${step ? `<button class="button button--small button--black" data-status="${o.id}:${step[0]}">${step[1]}</button>` : ""}
-          <button class="button button--small button--line" data-paid="${o.id}">${o.payment.paid ? "Marcar sin cobrar" : "Marcar cobrado"}</button>
-          ${!closed ? `<button class="link-danger" data-status="${o.id}:cancelado">Cancelar</button>` : `<button class="link-danger" data-del-order="${o.id}">Eliminar</button>`}
+          ${isAdmin ? `<button class="button button--small button--line" data-paid="${o.id}">${o.payment.paid ? "Marcar sin cobrar" : "Marcar cobrado"}</button>` : ""}
+          ${!isAdmin ? "" : !closed ? `<button class="link-danger" data-status="${o.id}:cancelado">Cancelar</button>` : `<button class="link-danger" data-del-order="${o.id}">Eliminar</button>`}
         </footer></article>`;
     }).join("") : `<p class="empty">No hay pedidos en esta vista. Cuando alguien pida desde la web, va a aparecer acá.</p>`;
   };
@@ -159,7 +160,7 @@ import { burgerfit } from "../data/burgerfit";
        <td class="row-actions"><button data-edit-user="${u.id}">Editar</button><button class="link-danger" data-del-user="${u.id}">Eliminar</button></td></tr>`).join("")}</tbody></table>`;
   };
 
-  const refreshAll = () => Promise.all([renderOrders(), renderProducts(), renderUsers()]);
+  const refreshAll = () => Promise.all([renderOrders(), ...(isAdmin ? [renderProducts(), renderUsers()] : [])]);
 
   // ---- Formularios en ventana ----
   const modal = $<HTMLDialogElement>("[data-modal]"), mform = $<HTMLFormElement>("[data-modal-form]");
@@ -225,8 +226,17 @@ import { burgerfit } from "../data/burgerfit";
 
   const start = async () => {
     const me = await api.currentUser();
+    isAdmin = me?.role === "admin";
     $("[data-login]").hidden = !!me; $("[data-admin]").hidden = !me;
+    document.querySelectorAll<HTMLElement>('[data-tab="products"],[data-tab="users"]').forEach((b) => (b.hidden = !isAdmin));
+    document.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === "orders")));
+    document.querySelectorAll<HTMLElement>("[data-panel]").forEach((p) => (p.hidden = p.dataset.panel !== "orders"));
     if (me) { $("[data-whoami]").textContent = me.name; refreshAll(); }
   };
-  start();
+
+  // La sesión nunca se conserva: al cargar, recargar o salir de esta página se cierra.
+  const closeSession = () => navigator.sendBeacon("/api/auth/logout", new Blob(["{}"], { type: "application/json" }));
+  window.addEventListener("pagehide", closeSession);
+  window.addEventListener("pageshow", (e) => { if (e.persisted) api.logout().then(start); });
+  api.logout().then(start);
 </script>
