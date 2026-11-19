@@ -39,7 +39,13 @@ export const api = {
   saveUser: (u: Partial<User> & { name: string; username: string }) => (u.id ? call<User>("PUT", `users/${u.id}`, u) : call<User>("POST", "users", u)),
   deleteUser: (id: string) => call("DELETE", `users/${id}`),
 
-  login: (username: string, password: string) => call<User>("POST", "auth/login", { username, password }).catch(() => null),
+  login: async (username: string, password: string): Promise<User | null> => {
+    const r = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password }) });
+    if (r.status === 401) return null;
+    const data = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(data?.error || "No se pudo conectar con el servidor.");
+    return data as User;
+  },
   currentUser: () => call<User | null>("GET", "auth/me").catch(() => null),
   logout: () => call("POST", "auth/logout", {}).catch(() => null),
 };

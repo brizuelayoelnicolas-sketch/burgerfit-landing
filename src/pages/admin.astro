@@ -215,10 +215,12 @@ import { burgerfit } from "../data/burgerfit";
   $<HTMLFormElement>("[data-login-form]").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target as HTMLFormElement;
-    const u = await api.login((f.elements.namedItem("user") as HTMLInputElement).value.trim(), (f.elements.namedItem("pass") as HTMLInputElement).value);
     const err = $("[data-login-error]");
-    err.hidden = !!u; err.textContent = "Usuario o contraseña incorrectos.";
-    if (u) { f.reset(); start(); }
+    try {
+      const u = await api.login((f.elements.namedItem("user") as HTMLInputElement).value.trim(), (f.elements.namedItem("pass") as HTMLInputElement).value);
+      err.hidden = !!u; err.textContent = "Usuario o contraseña incorrectos.";
+      if (u) { f.reset(); start(); }
+    } catch (ex) { err.hidden = false; err.textContent = (ex as Error).message; }
   });
 
   const start = async () => {
